@@ -1,11 +1,16 @@
 extern crate proc_macro;
+
+#[macro_use] extern crate quote;
+extern crate darling;
 extern crate syn;
 
-#[macro_use]
-extern crate quote;
+mod args;
+mod controller;
+mod routes;
 
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, DeriveInput, Ident};
+use syn::{parse_macro_input, DeriveInput, Ident, ItemMod};
+
 
 #[proc_macro_derive(HttpActionDescriptionProvider)]
 pub fn get_description(input: TokenStream) -> TokenStream {
@@ -27,84 +32,49 @@ pub fn get_description(input: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn create_route_action(input: TokenStream) -> TokenStream {
-    
     let input = parse_macro_input!(input as Ident);
+    routes::generate(input)
+}
+
+#[proc_macro_attribute]
+pub fn controller(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let controller = parse_macro_input!(item as ItemMod);
     
-    let name = Ident::new(&format!("{}RouteAction", input), input.span());
-    let action = Ident::new(&format!("{}Action", input), input.span());
-    let route = Ident::new(&format!("{}Route", input), input.span());
+    let controller_name = controller.ident;
+    let (_, functions )= controller.content.unwrap();
 
     let expanded = quote! {
 
-        use std::{collections::HashMap, sync::Arc};
-
-        use my_http_server::HttpOkResult;
-        use my_http_server::{http_path::PathSegments, HttpContext, HttpFailResult};
-
-        use crate::controllers::{
-            actions::#action,
-            documentation::{HttpActionDescription, HttpActionDescriptionProvider},
-        };
-
-        #[derive(HttpActionDescriptionProvider)]
-        pub struct #name {
-            pub route: PathSegments,
-            pub action: Arc<dyn #action + Send + Sync + 'static>,
+        use async_trait::async_trait;
+        use my_http_server_controllers::controllers::{actions::{PostAction, DeleteAction, GetAction, PutAction}, documentation::HttpActionDescription};        
+        
+        pub struct #controller_name;
+        impl #controller_name { 
+            pub fn new() -> Self {Self{}}
         }
-
-
-        pub struct #route {
-            pub no_keys: HashMap<String, #name>,
-            pub with_keys: Vec<#name>,
-        }
-
-        impl #route {
-            pub fn new() -> Self {
-                Self {
-                    no_keys: HashMap::new(),
-                    with_keys: Vec::new(),
-                }
-            }
-
-            pub fn register(&mut self, action: Arc<dyn #action + Send + Sync + 'static>) {
-                let route = action.get_route();
-                let route = PathSegments::new(route);
-
-                let action = #name { route, action };
-
-                if action.route.keys_amount == 0 {
-                    self.no_keys
-                        .insert(action.route.path.to_lowercase(), action);
-                } else {
-                    self.with_keys.push(action);
-                }
-            }
-
-            pub async fn handle_request(
-                &self,
-                ctx: &mut HttpContext,
-            ) -> Result<Option<HttpOkResult>, HttpFailResult> {
-                let path = ctx.request.get_path_lower_case();
-                if let Some(route_action) = self.no_keys.get(path) {
-                    let result = route_action.action.handle_request(ctx).await?;
-                    return Ok(Some(result));
-                }
-
-                for route_action in &self.with_keys {
-                    if route_action
-                        .route
-                        .is_my_path(ctx.request.get_path_lower_case())
-                    {
-                        ctx.request.route = Some(route_action.route.clone());
-                        let result = route_action.action.handle_request(ctx).await?;
-                        return Ok(Some(result));
-                    }
-                }
-
-                Ok(None)
-            }
-        }
+        
+        #(#functions)*
     };
 
     expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
+    controller::generate_endpoint("GetAction", attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn post(attr: TokenStream, item: TokenStream) -> TokenStream {
+    controller::generate_endpoint("PostAction", attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn put(attr: TokenStream, item: TokenStream) -> TokenStream {
+    controller::generate_endpoint("PutAction", attr, item)
+}
+
+#[proc_macro_attribute]
+pub fn delete(attr: TokenStream, item: TokenStream) -> TokenStream {
+    controller::generate_endpoint("DeleteAction", attr, item)
 }
