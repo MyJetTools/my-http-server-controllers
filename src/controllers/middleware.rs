@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use hyper::Method;
+use my_http_server::hyper::Method;
 use std::sync::Arc;
 
 use my_http_server::{

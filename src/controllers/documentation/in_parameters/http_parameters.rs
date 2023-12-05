@@ -1,4 +1,4 @@
-use hyper::Method;
+use my_http_server::hyper::Method;
 use rust_extensions::lazy::LazyVec;
 
 use super::{HttpInputParameter, HttpParameterInputSource};
